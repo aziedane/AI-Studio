@@ -4,11 +4,7 @@
 Salalin dan jalankan script ini di **SQL Editor** Supabase Anda untuk membuat tabel yang dibutuhkan dengan Row Level Security (RLS) yang aman:
 
 ```sql
--- Hapus jika ingin reset (Hati-hati: data akan hilang!)
--- DROP TABLE IF EXISTS content_items;
--- DROP TABLE IF EXISTS trends;
-
--- Tabel Trends
+-- 1. Tabel Trends
 CREATE TABLE IF NOT EXISTS trends (
     id TEXT PRIMARY KEY,
     source TEXT NOT NULL,
@@ -18,7 +14,7 @@ CREATE TABLE IF NOT EXISTS trends (
     user_id UUID REFERENCES auth.users(id) ON DELETE CASCADE
 );
 
--- Tabel Content Items
+-- 2. Tabel Content Items
 CREATE TABLE IF NOT EXISTS content_items (
     id TEXT PRIMARY KEY,
     trend_id TEXT,
@@ -36,17 +32,21 @@ CREATE TABLE IF NOT EXISTS content_items (
     user_id UUID REFERENCES auth.users(id) ON DELETE CASCADE
 );
 
--- Aktifkan RLS
+-- Aktifkan RLS (Aman jika sudah aktif)
 ALTER TABLE trends ENABLE ROW LEVEL SECURITY;
 ALTER TABLE content_items ENABLE ROW LEVEL SECURITY;
 
--- Kebijakan Trends: Hanya pemilik yang bisa akses
-CREATE POLICY "Users can manage their own trends" ON trends
-    FOR ALL USING (auth.uid() = user_id);
+-- 3. Kebijakan Keamanan (Hapus dulu jika ada lalu buat baru agar tidak error)
+DO $$ 
+BEGIN
+    DROP POLICY IF EXISTS "Users can manage their own trends" ON trends;
+    CREATE POLICY "Users can manage their own trends" ON trends
+        FOR ALL USING (auth.uid() = user_id);
 
--- Kebijakan Content Items: Hanya pemilik yang bisa akses
-CREATE POLICY "Users can manage their own content" ON content_items
-    FOR ALL USING (auth.uid() = user_id);
+    DROP POLICY IF EXISTS "Users can manage their own content" ON content_items;
+    CREATE POLICY "Users can manage their own content" ON content_items
+        FOR ALL USING (auth.uid() = user_id);
+END $$;
 ```
 
 ## 2. Hubungkan Google OAuth
