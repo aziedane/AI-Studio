@@ -63,18 +63,17 @@ END $$;
 
 -- 4. Aktifkan Realtime untuk Tabel (Penting!)
 -- Supabase memerlukan tabel ditambahkan ke publication 'supabase_realtime' agar perubahan bisa disiarkan.
--- Jalankan ini jika Anda ingin fitur "Umpan Konten" terupdate secara otomatis tanpa refresh.
-begin;
-  -- Hapus publikasi jika sudah ada (opsional, untuk reset)
-  -- drop publication if exists supabase_realtime;
-  
-  -- Buat publikasi jika belum ada
-  create publication supabase_realtime;
-commit;
+DO $$
+BEGIN
+    -- Buat publikasi jika belum ada
+    IF NOT EXISTS (SELECT 1 FROM pg_publication WHERE pubname = 'supabase_realtime') THEN
+        CREATE PUBLICATION supabase_realtime;
+    END IF;
+END $$;
 
--- Tambahkan tabel ke publikasi
-alter publication supabase_realtime add table trends;
-alter publication supabase_realtime add table content_items;
+-- Tambahkan tabel ke publikasi (Aman jika sudah ada)
+ALTER PUBLICATION supabase_realtime ADD TABLE trends;
+ALTER PUBLICATION supabase_realtime ADD TABLE content_items;
 ```
 
 ## 2. Hubungkan Google OAuth & URL Pengalihan
