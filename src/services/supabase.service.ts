@@ -72,6 +72,8 @@ export const supabaseService = {
   syncTrends(userId: string, callback: (trends: Trend[]) => void) {
     try {
       const supabase = getSupabase();
+      console.log(`[REALTIME] Memulai sinkronisasi tren untuk user: ${userId}`);
+      
       // Initial fetch
       supabase
         .from('trends')
@@ -79,27 +81,45 @@ export const supabaseService = {
         .eq('user_id', userId)
         .order('timestamp', { ascending: false })
         .then(({ data, error }) => {
-          if (!error && data) callback(data as any);
+          if (error) {
+            console.error("[REALTIME] Gagal fetch awal tren:", error);
+          } else if (data) {
+            callback(data as any);
+          }
         });
 
       // Real-time subscription
       const channel = supabase
-        .channel('trends-changes')
+        .channel(`trends-db-changes-${userId}`)
         .on(
           'postgres_changes',
-          { event: '*', schema: 'public', table: 'trends', filter: `user_id=eq.${userId}` },
-          async () => {
-            const { data } = await supabase
+          { 
+            event: '*', 
+            schema: 'public', 
+            table: 'trends', 
+            filter: `user_id=eq.${userId}` 
+          },
+          async (payload) => {
+            console.log("[REALTIME] Perubahan tren terdeteksi:", payload.eventType);
+            const { data, error } = await supabase
               .from('trends')
               .select('*')
               .eq('user_id', userId)
               .order('timestamp', { ascending: false });
-            if (data) callback(data as any);
+            
+            if (error) {
+              console.error("[REALTIME] Gagal mengambil ulang tren setelah perubahan:", error);
+            } else if (data) {
+              callback(data as any);
+            }
           }
         )
-        .subscribe();
+        .subscribe((status) => {
+          console.log(`[REALTIME] Status langganan tren: ${status}`);
+        });
 
       return () => {
+        console.log("[REALTIME] Memberhentikan sinkronisasi tren");
         supabase.removeChannel(channel);
       };
     } catch (e) {
@@ -111,6 +131,8 @@ export const supabaseService = {
   syncContentItems(userId: string, callback: (items: ContentPiece[]) => void) {
     try {
       const supabase = getSupabase();
+      console.log(`[REALTIME] Memulai sinkronisasi konten untuk user: ${userId}`);
+
       // Initial fetch
       supabase
         .from('content_items')
@@ -118,27 +140,45 @@ export const supabaseService = {
         .eq('user_id', userId)
         .order('created_at', { ascending: false })
         .then(({ data, error }) => {
-          if (!error && data) callback(this.mapFromSupabase(data) as any);
+          if (error) {
+            console.error("[REALTIME] Gagal fetch awal konten:", error);
+          } else if (data) {
+            callback(this.mapFromSupabase(data) as any);
+          }
         });
 
       // Real-time subscription
       const channel = supabase
-        .channel('content-changes')
+        .channel(`content-db-changes-${userId}`)
         .on(
           'postgres_changes',
-          { event: '*', schema: 'public', table: 'content_items', filter: `user_id=eq.${userId}` },
-          async () => {
-            const { data } = await supabase
+          { 
+            event: '*', 
+            schema: 'public', 
+            table: 'content_items', 
+            filter: `user_id=eq.${userId}` 
+          },
+          async (payload) => {
+            console.log("[REALTIME] Perubahan konten terdeteksi:", payload.eventType);
+            const { data, error } = await supabase
               .from('content_items')
               .select('*')
               .eq('user_id', userId)
               .order('created_at', { ascending: false });
-            if (data) callback(this.mapFromSupabase(data) as any);
+            
+            if (error) {
+              console.error("[REALTIME] Gagal mengambil ulang konten setelah perubahan:", error);
+            } else if (data) {
+              callback(this.mapFromSupabase(data) as any);
+            }
           }
         )
-        .subscribe();
+        .subscribe((status) => {
+          console.log(`[REALTIME] Status langganan konten: ${status}`);
+        });
 
       return () => {
+        console.log("[REALTIME] Memberhentikan sinkronisasi konten");
         supabase.removeChannel(channel);
       };
     } catch (e) {
@@ -182,6 +222,15 @@ export const supabaseService = {
     const supabase = getSupabase();
     const { error } = await supabase
       .from('content_items')
+      .delete()
+      .eq('id', id);
+    if (error) throw error;
+  },
+
+  async deleteTrend(id: string) {
+    const supabase = getSupabase();
+    const { error } = await supabase
+      .from('trends')
       .delete()
       .eq('id', id);
     if (error) throw error;

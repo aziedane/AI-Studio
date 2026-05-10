@@ -87,7 +87,25 @@ export const TrendList: React.FC = () => {
               {trend.topic}
             </h4>
             <div className="flex justify-between items-center pt-4 border-t border-[#1A1A1A]">
-               <span className="text-[9px] font-mono text-[#444] uppercase">{new Date(trend.timestamp).toLocaleTimeString()}</span>
+               <div className="flex flex-col">
+                 <span className="text-[9px] font-mono text-[#444] uppercase">{new Date(trend.timestamp).toLocaleTimeString()}</span>
+                 <button 
+                   onClick={async (e) => {
+                     e.stopPropagation();
+                     if (confirm("Hapus tren ini?")) {
+                       try {
+                         await supabaseService.deleteTrend(trend.id);
+                         addLog(`Tren "${trend.topic}" dihapus`, "info");
+                       } catch (err: any) {
+                         alert("Gagal menghapus: " + err.message);
+                       }
+                     }
+                   }}
+                   className="text-[8px] font-mono text-red-500/40 hover:text-red-500 uppercase tracking-tighter mt-1 text-left"
+                 >
+                   [ Hapus Tren ]
+                 </button>
+               </div>
                <button 
                 onClick={() => generateBrief(trend)}
                 className="text-[9px] font-mono text-white uppercase tracking-[0.2em] hover:underline"

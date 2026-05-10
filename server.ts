@@ -135,12 +135,26 @@ async function startServer() {
 
     try {
       console.log(`[STOCK] Searching Pexels for: "${query}"`);
-      const response = await axios.get(`https://api.pexels.com/videos/search?query=${query}&per_page=5`, {
-        headers: { Authorization: apiKey },
-        timeout: 10000
-      });
       
-      const videos = response.data.videos;
+      const fetchWithRetry = async (url: string, headers: any, maxRetries = 2) => {
+        for (let attempt = 0; attempt <= maxRetries; attempt++) {
+          try {
+            return await axios.get(url, { headers, timeout: 30000 });
+          } catch (err: any) {
+            if (err.response?.status === 429 && attempt < maxRetries) {
+              const delay = 2000 * (attempt + 1);
+              console.warn(`[STOCK] Pexels 429. Retry ${attempt + 1} in ${delay}ms`);
+              await new Promise(r => setTimeout(r, delay));
+              continue;
+            }
+            throw err;
+          }
+        }
+      };
+
+      const response = await fetchWithRetry(`https://api.pexels.com/videos/search?query=${query}&per_page=5`, { Authorization: apiKey });
+      
+      const videos = response?.data.videos;
       if (videos && videos.length > 0) {
         // Pick a random video from the top results to avoid repetition
         const video = videos[Math.floor(Math.random() * Math.min(videos.length, 3))];
@@ -242,38 +256,66 @@ async function startServer() {
 
     console.log(`[RENDER-SERVER] Starting full render for: ${title} (${contentId})`);
     
+    // Helper for robust downloads with retry
+    const downloadWithRetry = async (url: string, dest: string, type: string, maxRetries = 4) => {
+      for (let attempt = 0; attempt <= maxRetries; attempt++) {
+        try {
+          const res = await axios.get(url, { 
+            responseType: 'arraybuffer',
+            timeout: 60000,
+            headers: {
+              'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
+            }
+          });
+          fs.writeFileSync(dest, Buffer.from(res.data));
+          return true;
+        } catch (err: any) {
+          const isRateLimit = err.response?.status === 429;
+          if (isRateLimit && attempt < maxRetries) {
+            const delay = Math.pow(2, attempt) * 2000 + Math.random() * 1000;
+            console.warn(`[RENDER-SERVER] 429 Rate Limit for ${type}. Retrying in ${Math.round(delay)}ms...`);
+            await new Promise(resolve => setTimeout(resolve, delay));
+            continue;
+          }
+          throw err;
+        }
+      }
+      return false;
+    };
+
     try {
-      // Step 1: Prepare work directories and download assets in parallel
+      // Step 1: Prepare work directories and download assets
       const sceneFiles: string[] = [];
-      const renderTasks = storyboard.map(async (scene: any, i: number) => {
-        const sceneId = `scene_${i.toString().padStart(3, '0')}`;
-        const imgPath = path.join(workDir, `${sceneId}_img`);
-        const audioPath = path.join(workDir, `${sceneId}_audio.mp3`);
-        const sceneOutputPath = path.join(workDir, `${sceneId}_out.mp4`);
+      const preparedScenes = [];
+      
+      const downloadBatchSize = 4;
+      for (let i = 0; i < storyboard.length; i += downloadBatchSize) {
+        const batch = storyboard.slice(i, i + downloadBatchSize);
+        await Promise.all(batch.map(async (scene: any, batchIdx: number) => {
+          const idx = i + batchIdx;
+          const sceneId = `scene_${idx.toString().padStart(3, '0')}`;
+          const imgPath = path.join(workDir, `${sceneId}_img`);
+          const audioPath = path.join(workDir, `${sceneId}_audio.mp3`);
+          const sceneOutputPath = path.join(workDir, `${sceneId}_out.mp4`);
 
-        // Download assets in parallel
-        console.log(`[RENDER-SERVER] Downloading assets for ${sceneId}...`);
-        
-        const imageUrl = scene.imageUrl || `https://placehold.co/1280x720/000000/FFFFFF?text=SCENE+${i+1}`;
-        const imagePromise = axios.get(imageUrl, { responseType: 'arraybuffer' }).then(res => {
-          fs.writeFileSync(imgPath, Buffer.from(res.data));
-        });
+          console.log(`[RENDER-SERVER] Gathering assets for ${sceneId}...`);
+          
+          const imageUrl = scene.imageUrl || `https://placehold.co/1280x720/000000/FFFFFF?text=SCENE+${idx+1}`;
+          await downloadWithRetry(imageUrl, imgPath, 'image');
 
-        const audioPromise = scene.voiceUrl 
-          ? axios.get(scene.voiceUrl, { responseType: 'arraybuffer' }).then(res => {
-              fs.writeFileSync(audioPath, Buffer.from(res.data));
-            })
-          : new Promise((resolve, reject) => {
+          if (scene.voiceUrl) {
+            await downloadWithRetry(scene.voiceUrl, audioPath, 'audio');
+          } else {
+            await new Promise((resolve, reject) => {
               exec(`ffmpeg -f lavfi -i anullsrc=r=44100:cl=mono -t ${scene.duration || 5} -q:a 9 -acodec libmp3lame ${audioPath}`, (err) => {
                 if (err) reject(err); else resolve(true);
               });
             });
-
-        await Promise.all([imagePromise, audioPromise]);
-        return { imgPath, audioPath, sceneOutputPath, scene, i };
-      });
-
-      const preparedScenes = await Promise.all(renderTasks);
+          }
+          
+          preparedScenes[idx] = { imgPath, audioPath, sceneOutputPath, scene, i: idx };
+        }));
+      }
 
       // Step 2: Render individual scene MP4s in batches of 3 to speed up but avoid crashing
       const batchSize = 3;

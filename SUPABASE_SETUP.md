@@ -60,6 +60,21 @@ BEGIN
     CREATE POLICY "Users can manage their own content" ON content_items
         FOR ALL USING (auth.uid() = user_id);
 END $$;
+
+-- 4. Aktifkan Realtime untuk Tabel (Penting!)
+-- Supabase memerlukan tabel ditambahkan ke publication 'supabase_realtime' agar perubahan bisa disiarkan.
+-- Jalankan ini jika Anda ingin fitur "Umpan Konten" terupdate secara otomatis tanpa refresh.
+begin;
+  -- Hapus publikasi jika sudah ada (opsional, untuk reset)
+  -- drop publication if exists supabase_realtime;
+  
+  -- Buat publikasi jika belum ada
+  create publication supabase_realtime;
+commit;
+
+-- Tambahkan tabel ke publikasi
+alter publication supabase_realtime add table trends;
+alter publication supabase_realtime add table content_items;
 ```
 
 ## 2. Hubungkan Google OAuth & URL Pengalihan

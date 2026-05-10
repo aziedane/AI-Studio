@@ -191,7 +191,16 @@ export const FeedList: React.FC<FeedListProps> = ({ onRender, onFinalize, onProd
                   )}
 
                   <button 
-                    onClick={() => supabaseService.deleteContentItem(item.id)}
+                    onClick={async () => {
+                      if (confirm("Hapus item ini?")) {
+                        try {
+                          await supabaseService.deleteContentItem(item.id);
+                        } catch (err: any) {
+                          console.error("Delete error:", err);
+                          alert("Gagal menghapus: " + err.message);
+                        }
+                      }
+                    }}
                     className="w-full py-1.5 text-red-500/60 hover:text-red-500 text-[9px] font-mono uppercase tracking-widest transition-all border border-transparent hover:border-red-500/20"
                   >
                     Hapus

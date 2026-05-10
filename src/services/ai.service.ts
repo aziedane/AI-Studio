@@ -69,7 +69,7 @@ export const aiService = {
       try {
         const query = scene.videoKeyword || scene.visual.split(' ').slice(0, 4).join(' ');
         const controller = new AbortController();
-        const timeoutId = setTimeout(() => controller.abort(), 8000);
+        const timeoutId = setTimeout(() => controller.abort(), 20000); // Increased to 20s
         
         const res = await fetch(`/api/stock/video?query=${encodeURIComponent(query)}`, { signal: controller.signal });
         clearTimeout(timeoutId);
