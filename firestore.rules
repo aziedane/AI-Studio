@@ -1,0 +1,87 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // 0. Global Safety Net
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
+    // --- Helpers ---
+    function isSignedIn() { return request.auth != null; }
+    function incoming() { return request.resource.data; }
+    function existing() { return resource.data; }
+    
+    function isValidId(id) { 
+      return id is string && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$'); 
+    }
+
+    function isOwner(data) {
+      return isSignedIn() && data.userId == request.auth.uid;
+    }
+
+    // Connectivity Test
+    match /test/connection {
+      allow get: if isSignedIn();
+    }
+
+    // --- Trends ---
+    match /trends/{trendId} {
+      function isValidTrend(data) {
+        return data.keys().hasAll(['id', 'source', 'topic', 'viralScore', 'timestamp', 'userId']) &&
+               data.keys().size() == 6 &&
+               data.id is string && data.id.size() <= 128 &&
+               data.source in ['Google Trends', 'Reddit', 'YouTube'] &&
+               data.topic is string && data.topic.size() <= 500 &&
+               data.viralScore is number &&
+               data.timestamp is string &&
+               data.userId == request.auth.uid;
+      }
+
+      allow get: if isOwner(resource.data);
+      allow list: if isSignedIn() && resource.data.userId == request.auth.uid;
+      
+      allow create: if isSignedIn() && isValidId(trendId) && isValidTrend(incoming());
+      
+      allow update: if isSignedIn() && isOwner(existing()) && isValidTrend(incoming()) && (
+        incoming().diff(existing()).affectedKeys().hasOnly(['topic', 'viralScore', 'timestamp'])
+      );
+
+      allow delete: if isOwner(existing());
+    }
+
+    // --- Content Items ---
+    match /contentItems/{itemId} {
+      function isValidContentItem(data) {
+        let required = ['id', 'trendId', 'title', 'script', 'status', 'progress', 'createdAt', 'userId'];
+        return data.keys().hasAll(required) &&
+               data.id is string && data.id.size() <= 128 &&
+               data.trendId is string && data.trendId.size() <= 128 &&
+               data.title is string && data.title.size() <= 500 &&
+               data.script is string && data.script.size() <= 20000 &&
+               data.status in ['DISCOVERY', 'DRAFTING', 'PRODUCTION', 'RENDERING', 'READY', 'PUBLISHED'] &&
+               data.progress is number &&
+               data.userId == request.auth.uid;
+      }
+
+      allow get: if isOwner(resource.data);
+      allow list: if isSignedIn() && resource.data.userId == request.auth.uid;
+
+      allow create: if isSignedIn() && isValidId(itemId) && isValidContentItem(incoming());
+
+      allow update: if isSignedIn() && isOwner(existing()) && isValidContentItem(incoming()) && (
+        // Identity protection
+        incoming().userId == existing().userId &&
+        incoming().id == existing().id &&
+        incoming().createdAt == existing().createdAt &&
+        // Allowed field transitions
+        incoming().diff(existing()).affectedKeys().hasOnly([
+          'title', 'script', 'status', 'progress', 'thumbnailUrl', 
+          'videoUrl', 'videoStoryboard', 'downloadUrl', 
+          'publishedUrl', 'publishedAt'
+        ])
+      );
+
+      allow delete: if isOwner(existing());
+    }
+  }
+}

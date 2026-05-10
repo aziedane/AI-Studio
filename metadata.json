@@ -1,0 +1,8 @@
+{
+  "name": "AI Studio Pro",
+  "description": "Mesin produksi video AI otomatis yang mencari tren di Indonesia, membuat naskah, narasi suara, dan mastering video HD secara real-time.",
+  "requestFramePermissions": [
+    "camera",
+    "microphone"
+  ]
+}
