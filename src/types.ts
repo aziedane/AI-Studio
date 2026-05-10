@@ -1,4 +1,4 @@
-export type PipelineStatus = 'DISCOVERY' | 'DRAFTING' | 'PRODUCTION' | 'RENDERING' | 'READY' | 'PUBLISHED';
+export type PipelineStatus = 'DISCOVERY' | 'DRAFTING' | 'PRODUCTION' | 'RENDERING' | 'READY' | 'PUBLISHED' | 'FAILED';
 
 export interface Trend {
   id: string;

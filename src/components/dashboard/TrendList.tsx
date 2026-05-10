@@ -19,9 +19,9 @@ export const TrendList: React.FC = () => {
     try {
       const newTrends = await aiService.scoutTrends(selectedNiche);
       if (newTrends.length > 0) {
-        await supabaseService.saveTrendsBatch(newTrends, user.id);
-        addLog(`Berhasil menemukan ${newTrends.length} tren baru.`, "success");
-        updateAgent('scout', { status: 'SUCCESS', lastAction: 'Database Diperbarui' });
+        useAppStore.getState().setTrends(newTrends); // Use store directly to avoid stale closured trends if needed, but trends from hook is fine
+        addLog(`Berhasil menemukan ${newTrends.length} tren baru (Transient).`, "success");
+        updateAgent('scout', { status: 'SUCCESS', lastAction: 'Lokal Update Selesai' });
       }
     } catch (e) {
       addLog("Gagal memindai tren.", "info");
@@ -38,9 +38,9 @@ export const TrendList: React.FC = () => {
     try {
       const brief = await aiService.draftScript(trend);
       if (brief) {
-        await supabaseService.saveContentItem(brief as any, user.id);
-        addLog(`Konten brief selesai dibuat: ${brief.title}`, "success");
-        updateAgent('architect', { status: 'SUCCESS', lastAction: 'Konsep Matang & Terarsip' });
+        useAppStore.getState().setContentItems([brief as any, ...useAppStore.getState().contentItems]);
+        addLog(`Konten brief selesai dibuat: ${brief.title} (Draft Lokal)`, "success");
+        updateAgent('architect', { status: 'SUCCESS', lastAction: 'Konsep Matang/Lokal' });
       }
     } catch (e) {
       addLog("Gagal membuat naskah.", "info");
@@ -90,16 +90,11 @@ export const TrendList: React.FC = () => {
                <div className="flex flex-col">
                  <span className="text-[9px] font-mono text-[#444] uppercase">{new Date(trend.timestamp).toLocaleTimeString()}</span>
                  <button 
-                   onClick={async (e) => {
+                   onClick={(e) => {
                      e.stopPropagation();
-                     if (confirm("Hapus tren ini?")) {
-                       try {
-                         await supabaseService.deleteTrend(trend.id);
-                         addLog(`Tren "${trend.topic}" dihapus`, "info");
-                       } catch (err: any) {
-                         alert("Gagal menghapus: " + err.message);
-                       }
-                     }
+                     const currentTrends = useAppStore.getState().trends;
+                     useAppStore.getState().setTrends(currentTrends.filter(t => t.id !== trend.id));
+                     addLog(`Tren "${trend.topic}" dihapus dari memori`, "info");
                    }}
                    className="text-[8px] font-mono text-red-500/40 hover:text-red-500 uppercase tracking-tighter mt-1 text-left"
                  >

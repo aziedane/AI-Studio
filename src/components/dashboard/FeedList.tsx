@@ -13,7 +13,7 @@ interface FeedListProps {
 }
 
 export const FeedList: React.FC<FeedListProps> = ({ onRender, onFinalize, onProduce, onDownload }) => {
-  const { contentItems, ytConnected, setSelectedVideoId } = useAppStore();
+  const { contentItems, ytConnected, setSelectedVideoId, setContentItems, addLog } = useAppStore();
 
   return (
     <div className="space-y-6">
@@ -135,6 +135,14 @@ export const FeedList: React.FC<FeedListProps> = ({ onRender, onFinalize, onProd
                     Ulang Produksi
                   </button>
 
+                  {item.status === 'FAILED' && (
+                    <div className="p-2 bg-red-900/20 border border-red-900/50 rounded-sm mb-2">
+                       <p className="text-[8px] font-mono text-red-500 uppercase text-center leading-tight">
+                         Gagal Render. Coba "Ulang Produksi" atau hapus item.
+                       </p>
+                    </div>
+                  )}
+
                   {item.status === 'PRODUCTION' && (
                     <button 
                       onClick={() => onRender(item.id)}
@@ -162,7 +170,7 @@ export const FeedList: React.FC<FeedListProps> = ({ onRender, onFinalize, onProd
                        </button>
                     </div>
                   ) : (
-                    item.progress > 0 && item.progress < 100 && (
+                    item.progress > 0 && item.progress < 100 && item.status !== 'FAILED' && (
                       <div className="w-full py-2 flex flex-col items-center justify-center gap-1.5 opacity-50">
                         <Loader2 className="w-3 h-3 animate-spin text-zinc-400" />
                         <span className="text-[8px] font-mono uppercase text-zinc-500 tracking-tighter">Sedang Diproses...</span>
@@ -191,19 +199,49 @@ export const FeedList: React.FC<FeedListProps> = ({ onRender, onFinalize, onProd
                   )}
 
                   <button 
-                    onClick={async () => {
-                      if (confirm("Hapus item ini?")) {
+                    onClick={async (e) => {
+                      e.stopPropagation();
+                      console.log("[UI] Delete requested for item:", item.id);
+                      
+                      if (confirm("⚠️ Hapus item ini secara permanen?")) {
+                        const originalItems = [...contentItems];
                         try {
-                          await supabaseService.deleteContentItem(item.id);
+                          // Optimistic update
+                          setContentItems(contentItems.filter(i => i.id !== item.id));
+                          addLog(`[SYSTEM] Menghapus: ${item.title}`, "info");
+                          
+                          console.log("[UI] Calling server delete endpoint...");
+                          const response = await fetch(`/api/content/${item.id}`, {
+                            method: 'DELETE'
+                          });
+                          
+                          console.log("[UI] Server response status:", response.status);
+                          
+                          if (!response.ok) {
+                            const errData = await response.json();
+                            console.error("[UI] Delete failed on server:", errData);
+                            throw new Error(errData.detail || "Server failed to delete");
+                          }
+                          console.log("[UI] Delete successful");
                         } catch (err: any) {
-                          console.error("Delete error:", err);
-                          alert("Gagal menghapus: " + err.message);
+                          console.error("Delete error details:", err);
+                          
+                          // Robust error handling for network failures
+                          if (err.message?.includes('Failed to fetch') || err.message?.includes('Network Error')) {
+                             const force = confirm("Masalah koneksi. Hapus saja dari tampilan lokal? (Konten mungkin muncul kembali saat reload)");
+                             if (!force) {
+                                setContentItems(originalItems);
+                             }
+                          } else {
+                            setContentItems(originalItems);
+                            alert("Gagal menghapus: " + (err.message || "Unknown error"));
+                          }
                         }
                       }
                     }}
-                    className="w-full py-1.5 text-red-500/60 hover:text-red-500 text-[9px] font-mono uppercase tracking-widest transition-all border border-transparent hover:border-red-500/20"
+                    className="w-full py-2 text-red-500/40 hover:text-red-500 hover:bg-red-500/5 text-[9px] font-mono uppercase tracking-widest transition-all border border-transparent hover:border-red-500/20 mt-4 flex items-center justify-center gap-1 border-t border-zinc-900 pt-4"
                   >
-                    Hapus
+                    <Layers className="w-2.5 h-2.5" /> Hapus Permanen
                   </button>
                 </div>
               </div>

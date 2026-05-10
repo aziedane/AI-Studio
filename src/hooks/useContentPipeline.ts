@@ -37,45 +37,44 @@ export const useContentPipeline = (canvasRef: React.RefObject<HTMLCanvasElement>
     addLog(`[PIPELINE] Memulai produksi aset untuk: ${item.title}`, "process");
 
     try {
-      // 1. Produce Visuals (Images/Videos) & Audio Scene by Scene
-      addLog(`[PIPELINE] Memulai pembangkitan aset scenografis...`, "process");
+      addLog(`[PIPELINE] Memulai pembangkitan aset scenografis secara paralel...`, "process");
       
       const producedScenes: any[] = [...item.videoStoryboard];
       
-      for (let i = 0; i < producedScenes.length; i++) {
-        const scene = producedScenes[i];
-        if (!scene) continue;
+      // Parallelize all scenes with concurrency limit (e.g. 4)
+      const batchSize = 4;
+      for (let i = 0; i < producedScenes.length; i += batchSize) {
+        const batch = producedScenes.slice(i, i + batchSize);
+        addLog(`[PIPELINE] Memproses Batch #${Math.floor(i/batchSize) + 1}...`, "process");
         
-        addLog(`[PIPELINE] Memproses Scene #${i + 1}/${producedScenes.length}...`, "process");
-        
-        // Visual
-        let visualResults;
-        try {
-          visualResults = await aiService.produceAssets([scene]);
-        } catch (visErr: any) {
-          addLog(`[PIPELINE] Gagal memproduksi visual scene #${i + 1}: ${visErr.message}`, "error");
-          throw visErr;
-        }
-        const visualScene = visualResults[0] || scene;
-        
-        // Audio
-        let voiceUrl = undefined;
-        try {
-          if (visualScene.audio) {
-            voiceUrl = await ttsService.generateAudio(visualScene.audio, visualScene.voiceTone) || undefined;
-          } else {
-            addLog(`[PIPELINE] Scene #${i + 1} tidak memiliki teks narasi.`, "info");
-          }
-        } catch (ttsErr: any) {
-          console.warn("TTS Failed for scene", i, ttsErr);
-          addLog(`[PIPELINE] TTS Gagal untuk scene #${i + 1}: ${ttsErr.message || "Unknown"}`, "info");
-          // Don't throw for TTS, continue without audio if necessary
-        }
+        await Promise.allSettled(batch.map(async (scene, batchIdx) => {
+          const idx = i + batchIdx;
+          if (!scene) return;
 
-        producedScenes[i] = {
-          ...visualScene,
-          voiceUrl: voiceUrl || null
-        };
+          // 1. Visual
+          let visualResults;
+          try {
+            visualResults = await aiService.produceAssets([scene]);
+          } catch (visErr) {
+            console.warn(`Visual failed for scene ${idx}`, visErr);
+          }
+          const visualScene = (visualResults && visualResults[0]) || scene;
+
+          // 2. Audio
+          let voiceUrl = undefined;
+          try {
+            if (visualScene.audio) {
+              voiceUrl = await ttsService.generateAudio(visualScene.audio, visualScene.voiceTone) || undefined;
+            }
+          } catch (ttsErr) {
+            console.warn(`TTS failed for scene ${idx}`, ttsErr);
+          }
+
+          producedScenes[idx] = {
+            ...visualScene,
+            voiceUrl: voiceUrl || null
+          };
+        }));
       }
 
       // Batch update after all scenes are done to save quota
@@ -99,7 +98,11 @@ export const useContentPipeline = (canvasRef: React.RefObject<HTMLCanvasElement>
         updatedAt: new Date().toISOString()
       };
 
-      await supabaseService.updateContentItem(contentId, finalUpdates);
+      const currentItems = useAppStore.getState().contentItems;
+      useAppStore.getState().setContentItems(
+        currentItems.map(i => i.id === contentId ? { ...i, ...finalUpdates } : i)
+      );
+      
       addLog(`[PIPELINE] Seluruh aset visual & audio siap. Status: PRODUCTION`, "success");
       updateAgent('producer', { status: 'SUCCESS', lastAction: 'Production Ready' });
       
@@ -118,65 +121,96 @@ export const useContentPipeline = (canvasRef: React.RefObject<HTMLCanvasElement>
     const item = itemOverride || contentItems.find(c => c.id === contentId);
     if (!item) return;
 
-    // Background process - no blocking modal
-    addLog(`[MASTERING] Menjalankan Server-Side Cinema Engine: ${item.title}`, "process");
-    setNotification({ msg: "Render dimulai di backend. Anda bisa tetap bekerja.", type: "info" });
-    updateAgent('publisher', { status: 'WORKING', lastAction: 'Backend Rendering...' });
+    addLog(`[MASTERING] Memulai render background: ${item.title}`, "process");
+    // Removed toast notification to reduce noise, keep in system log only
+    // setNotification({ msg: "Render dimulai di server.", type: "info" });
 
     try {
-      addLog("[PIPELINE] Mempersiapkan paket storyboard ke server render...", "process");
-      
       const response = await fetch('/api/render-backend', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           contentId,
+          userId: user.id, // PASS USER ID
           title: item.title,
-          storyboard: item.videoStoryboard
+          storyboard: item.videoStoryboard,
+          fullItem: item // PASS FULL ITEM DATA
         })
       });
 
       const data = await response.json();
-      
-      if (!response.ok) {
-        throw new Error(data.details || data.error || "Server render failed");
-      }
+      if (!response.ok) throw new Error(data.error || "Gagal memulai render");
 
-      if (data.success && data.downloadUrl) {
-        addLog(`[MASTERING] Server sukses merender video HD MP4.`, "success");
-        
-        await supabaseService.updateContentItem(contentId, {
-          status: 'READY',
-          progress: 100,
-          downloadUrl: data.downloadUrl
-        });
-        
-        addLog("Video Master siap untuk diunduh.", "success");
-        setNotification({ msg: "Video Berhasil Dirender! Silakan unduh.", type: "success" });
-        updateAgent('publisher', { status: 'SUCCESS', lastAction: 'HD MP4 Ready' });
-        return true;
-      }
-      throw new Error("Respons server tidak valid.");
+      addLog(`[PIPELINE] Job render ${data.jobId} berhasil didaftarkan.`, "success");
+      
+      // Start polling for status
+      const jobId = data.jobId;
+      const pollInterval = setInterval(async () => {
+        try {
+          const statusRes = await fetch(`/api/render/status/${jobId}`);
+          if (!statusRes.ok) throw new Error("Gagal mengambil status");
+          const job = await statusRes.json();
+          
+          if (job.status === 'COMPLETED') {
+            clearInterval(pollInterval);
+            addLog(`[PIPELINE] Render selesai untuk: ${item.title}`, "success");
+            // No need to manually update contentItems here because Supabase sync 
+            // will pick up the new record once the server saves it.
+          } else if (job.status === 'FAILED') {
+            clearInterval(pollInterval);
+            addLog(`[PIPELINE] Render gagal: ${job.error || "Unknown error"}`, "error");
+            const current = useAppStore.getState().contentItems;
+            useAppStore.getState().setContentItems(
+              current.map(i => i.id === contentId ? { ...i, status: 'FAILED' } : i)
+            );
+          } else {
+            // Update local progress with actual backend progress
+            const current = useAppStore.getState().contentItems;
+            useAppStore.getState().setContentItems(
+              current.map(i => i.id === contentId ? { ...i, progress: job.progress } : i)
+            );
+            console.log(`[POLL] Job ${jobId} progress: ${job.progress}%`);
+          }
+        } catch (pollErr) {
+          console.error("Polling error:", pollErr);
+        }
+      }, 3000); // Poll every 3 seconds
+
+      return true;
     } catch (e: any) {
-      console.error("Render error:", e);
-      addLog(`Gagal merender video: ${e.message}`, "info");
-      updateAgent('publisher', { status: 'ERROR', lastAction: 'Render Error' });
-      setNotification({ msg: "Render Gagal. Cek Log.", type: "error" });
+      addLog(`Gagal: ${e.message}`, "error");
+      const currentItems = useAppStore.getState().contentItems;
+      useAppStore.getState().setContentItems(
+        currentItems.map(i => i.id === contentId ? { ...i, status: 'FAILED' } : i)
+      );
       return false;
-    } finally {
-      setIsRendering(false);
     }
   };
 
   const downloadVideo = async (url: string, title: string) => {
     try {
-      addLog("[PIPELINE] Mengunduh video master...", "process");
+      addLog("[PIPELINE] Mengunduh file dari server...", "process");
       const response = await fetch(url);
       const blob = await response.blob();
+      
+      // Determine extension from url or content-type
+      let ext = 'mp4';
+      const lowercaseUrl = url.toLowerCase();
+      if (lowercaseUrl.includes('.jpg') || lowercaseUrl.includes('.jpeg') || lowercaseUrl.includes('format=jpg') || lowercaseUrl.includes('format=jpeg')) ext = 'jpg';
+      else if (lowercaseUrl.includes('.png') || lowercaseUrl.includes('format=png')) ext = 'png';
+      else if (lowercaseUrl.includes('.webp') || lowercaseUrl.includes('format=webp')) ext = 'webp';
+      else if (lowercaseUrl.includes('.mp4')) ext = 'mp4';
+      else if (response.headers.get('Content-Type')?.includes('image')) {
+        const ct = response.headers.get('Content-Type');
+        if (ct?.includes('png')) ext = 'png';
+        else if (ct?.includes('webp')) ext = 'webp';
+        else ext = 'jpg';
+      }
+
       const blobUrl = window.URL.createObjectURL(blob);
       const link = document.createElement('a');
       link.href = blobUrl;
-      link.download = `${title.replace(/\s+/g, '_')}_master.mp4`;
+      link.download = `${title.replace(/\s+/g, '_')}.${ext}`;
       document.body.appendChild(link);
       link.click();
       document.body.removeChild(link);
@@ -184,7 +218,7 @@ export const useContentPipeline = (canvasRef: React.RefObject<HTMLCanvasElement>
       addLog("Unduhan dimulai.", "success");
     } catch (err) {
       console.error("Download failed:", err);
-      addLog("Gagal mengunduh video.", "info");
+      addLog("Gagal mengunduh file.", "info");
       window.open(url, '_blank'); // Fallback
     }
   };

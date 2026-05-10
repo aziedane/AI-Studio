@@ -69,65 +69,6 @@ export const supabaseService = {
     }
   },
 
-  syncTrends(userId: string, callback: (trends: Trend[]) => void) {
-    try {
-      const supabase = getSupabase();
-      console.log(`[REALTIME] Memulai sinkronisasi tren untuk user: ${userId}`);
-      
-      // Initial fetch
-      supabase
-        .from('trends')
-        .select('*')
-        .eq('user_id', userId)
-        .order('timestamp', { ascending: false })
-        .then(({ data, error }) => {
-          if (error) {
-            console.error("[REALTIME] Gagal fetch awal tren:", error);
-          } else if (data) {
-            callback(data as any);
-          }
-        });
-
-      // Real-time subscription
-      const channel = supabase
-        .channel(`trends-db-changes-${userId}`)
-        .on(
-          'postgres_changes',
-          { 
-            event: '*', 
-            schema: 'public', 
-            table: 'trends', 
-            filter: `user_id=eq.${userId}` 
-          },
-          async (payload) => {
-            console.log("[REALTIME] Perubahan tren terdeteksi:", payload.eventType);
-            const { data, error } = await supabase
-              .from('trends')
-              .select('*')
-              .eq('user_id', userId)
-              .order('timestamp', { ascending: false });
-            
-            if (error) {
-              console.error("[REALTIME] Gagal mengambil ulang tren setelah perubahan:", error);
-            } else if (data) {
-              callback(data as any);
-            }
-          }
-        )
-        .subscribe((status) => {
-          console.log(`[REALTIME] Status langganan tren: ${status}`);
-        });
-
-      return () => {
-        console.log("[REALTIME] Memberhentikan sinkronisasi tren");
-        supabase.removeChannel(channel);
-      };
-    } catch (e) {
-      console.warn("Supabase syncTrends failed to initialize:", e);
-      return () => {};
-    }
-  },
-
   syncContentItems(userId: string, callback: (items: ContentPiece[]) => void) {
     try {
       const supabase = getSupabase();
@@ -141,7 +82,11 @@ export const supabaseService = {
         .order('created_at', { ascending: false })
         .then(({ data, error }) => {
           if (error) {
-            console.error("[REALTIME] Gagal fetch awal konten:", error);
+            if (error.message?.includes('Failed to fetch')) {
+               console.error("[REALTIME] Koneksi ke Supabase gagal. Silakan periksa VITE_SUPABASE_URL.");
+            } else {
+               console.error("[REALTIME] Gagal fetch awal konten:", error);
+            }
           } else if (data) {
             callback(this.mapFromSupabase(data) as any);
           }
@@ -187,17 +132,6 @@ export const supabaseService = {
     }
   },
 
-  async saveTrendsBatch(trends: Trend[], userId: string) {
-    const supabase = getSupabase();
-    const dataToSave = trends.map(t => ({
-      ...this.mapToSupabase(t),
-      user_id: userId,
-    }));
-    
-    const { error } = await supabase.from('trends').upsert(dataToSave);
-    if (error) throw error;
-  },
-
   async saveContentItem(item: ContentPiece, userId: string) {
     const supabase = getSupabase();
     const dataToSave = {
@@ -222,15 +156,6 @@ export const supabaseService = {
     const supabase = getSupabase();
     const { error } = await supabase
       .from('content_items')
-      .delete()
-      .eq('id', id);
-    if (error) throw error;
-  },
-
-  async deleteTrend(id: string) {
-    const supabase = getSupabase();
-    const { error } = await supabase
-      .from('trends')
       .delete()
       .eq('id', id);
     if (error) throw error;
