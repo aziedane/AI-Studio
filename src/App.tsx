@@ -59,6 +59,29 @@ export default function App() {
   }, [store.notification]);
 
   useEffect(() => {
+    // Detect if we are the auth popup that just finished
+    const hash = window.location.hash;
+    const search = window.location.search;
+    if (window.opener && (hash.includes('access_token=') || search.includes('code='))) {
+      // Wait for Supabase to process the hash
+      const checkSession = setInterval(async () => {
+        try {
+          const session = await supabaseService.getSession();
+          if (session) {
+            clearInterval(checkSession);
+            window.opener.postMessage({ type: 'SUPABASE_AUTH_SUCCESS', session }, window.location.origin);
+            setTimeout(() => window.close(), 500);
+          }
+        } catch (e) {
+          console.error("Popup session check error:", e);
+        }
+      }, 500);
+      
+      // Safety timeout
+      setTimeout(() => clearInterval(checkSession), 10000);
+      return;
+    }
+
     const subscription = supabaseService.onAuthStateChange((u) => {
       store.setUser(u);
       store.setIsAuthLoading(false);
@@ -76,12 +99,41 @@ export default function App() {
     };
     checkYtStatus();
 
-    // Listen for OAuth success message
+    // Listen for OAuth success messages
     const handleMessage = (event: MessageEvent) => {
       if (event.data?.type === 'YOUTUBE_AUTH_SUCCESS') {
         store.setYtConnected(true);
         store.addLog("YouTube berhasil terhubung!", "success");
         store.setNotification({ msg: "YouTube Connected!", type: "success" });
+      }
+
+      if (event.data?.type === 'SUPABASE_AUTH_SUCCESS') {
+        const session = event.data.session;
+        console.log("Menerima session dari popup:", session?.user?.email);
+        
+        if (session?.user) {
+          store.setIsAuthLoading(true);
+          supabaseService.setSession(session).then(() => {
+            console.log("Set session berhasil untuk:", session.user.email);
+            // Re-fetch user to be sure
+            supabaseService.getSession().then(freshSession => {
+              const finalUser = freshSession?.user || session.user;
+              store.setUser(finalUser);
+              store.addLog(`Halo, ${finalUser.user_metadata?.full_name || finalUser.user_metadata?.name || finalUser.email}!`, "success");
+              store.setNotification({ msg: "Login Success!", type: "success" });
+              store.setIsAuthLoading(false);
+            });
+          }).catch(err => {
+            console.error("Set session error detail:", err);
+            store.addLog("Gagal sinkronisasi sesi: " + err.message, "error");
+            // Fallback attempt
+            store.setUser(session.user);
+            store.setIsAuthLoading(false);
+          });
+        } else {
+          console.error("Session dari popup kosong atau tidak valid");
+          store.setIsAuthLoading(false);
+        }
       }
     };
     window.addEventListener('message', handleMessage);
@@ -140,6 +192,9 @@ export default function App() {
       // 2. ARCHITECT PHASE
       const brief = await aiService.draftScript(topTrend);
       if (!brief) throw new Error("Gagal merancang naskah.");
+      if (!brief.videoStoryboard || brief.videoStoryboard.length === 0) {
+        throw new Error("Naskah berhasil dibuat tapi storyboard kosong.");
+      }
       
       await supabaseService.saveContentItem(brief as any, store.user.id);
       store.updateAgent('architect', { status: 'SUCCESS', lastAction: 'Script Ready' });
@@ -191,8 +246,18 @@ export default function App() {
 
   const handleLogin = async () => {
     try {
+      // First, try a quick sync check
+      const session = await supabaseService.getSession();
+      if (session?.user) {
+        store.setUser(session.user);
+        store.addLog("Sesi terdeteksi, memulihkan...", "success");
+        return;
+      }
+      
+      store.setIsAuthLoading(true);
       await supabaseService.login();
     } catch (err: any) {
+      store.setIsAuthLoading(false);
       console.error("Login detail:", err);
       const isProviderError = err.message?.includes("provider is not enabled") || JSON.stringify(err).includes("provider is not enabled");
       
@@ -207,7 +272,7 @@ export default function App() {
         store.setNotification({ 
           msg: err.message?.includes("credentials missing") 
             ? "Sila set Supabase URL & Key di Settings" 
-            : "Gagal Masuk: Cek Koneksi/Config", 
+            : "Gagal Masuk: Cek Koneksi/Config atau gunakan 'Buka di Tab Baru'", 
           type: "error" 
         });
       }
@@ -246,10 +311,18 @@ export default function App() {
           ) : store.user ? (
             <div className="flex items-center gap-3 pr-2 border-r border-[#2A2A2A]">
                <div className="flex flex-col items-end">
-                  <span className="text-[10px] font-mono text-white truncate max-w-[120px]">{store.user.user_metadata?.full_name || store.user.email}</span>
-                  <span className="text-[8px] font-mono text-emerald-500 uppercase tracking-widest">Connected</span>
+                  <span className="text-[10px] font-mono text-white truncate max-w-[150px] font-bold">
+                    {store.user.user_metadata?.full_name || store.user.user_metadata?.name || store.user.email}
+                  </span>
+                  <span className="text-[8px] font-mono text-emerald-500 uppercase tracking-widest">Sesi Aktif</span>
                </div>
-               <button onClick={() => supabaseService.logout()} className="p-2 text-[#666] hover:text-red-400 transition-colors">
+               <button 
+                 onClick={async () => {
+                   await supabaseService.logout();
+                   store.setUser(null);
+                 }} 
+                 className="p-2 text-[#666] hover:text-red-400 transition-colors"
+               >
                   <LogOut className="w-5 h-5" />
                </button>
             </div>

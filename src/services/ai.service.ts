@@ -84,13 +84,15 @@ export const aiService = {
       }
 
       if (!videoUrl) {
-        videoUrl = findVideoClip(scene.visual, scene.videoKeyword);
+        videoUrl = findVideoClip(scene.visual || "abstract", scene.videoKeyword);
       }
       
       // 2. Generate Image (always generate as fallback or background)
       let imageUrl = "https://images.unsplash.com/photo-1618005182384-a83a8bd57fbe?q=80&w=1920";
       try {
-        imageUrl = await generateImage(scene.visual);
+        if (scene.visual) {
+          imageUrl = await generateImage(scene.visual);
+        }
       } catch (e) {
         console.warn(`[PRODUCER] Image generation failed for scene #${idx + 1}`, e);
       }

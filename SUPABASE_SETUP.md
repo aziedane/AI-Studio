@@ -11,6 +11,7 @@ CREATE TABLE IF NOT EXISTS trends (
     topic TEXT NOT NULL,
     viral_score NUMERIC,
     timestamp TIMESTAMPTZ DEFAULT NOW(),
+    updated_at TIMESTAMPTZ DEFAULT NOW(),
     user_id UUID REFERENCES auth.users(id) ON DELETE CASCADE
 );
 
@@ -29,8 +30,20 @@ CREATE TABLE IF NOT EXISTS content_items (
     published_url TEXT,
     published_at TIMESTAMPTZ,
     created_at TIMESTAMPTZ DEFAULT NOW(),
+    updated_at TIMESTAMPTZ DEFAULT NOW(),
     user_id UUID REFERENCES auth.users(id) ON DELETE CASCADE
 );
+
+-- Tambahkan kolom updated_at jika belum ada
+DO $$ 
+BEGIN 
+    IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='trends' AND column_name='updated_at') THEN
+        ALTER TABLE trends ADD COLUMN updated_at TIMESTAMPTZ DEFAULT NOW();
+    END IF;
+    IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='content_items' AND column_name='updated_at') THEN
+        ALTER TABLE content_items ADD COLUMN updated_at TIMESTAMPTZ DEFAULT NOW();
+    END IF;
+END $$;
 
 -- Aktifkan RLS (Aman jika sudah aktif)
 ALTER TABLE trends ENABLE ROW LEVEL SECURITY;
@@ -49,16 +62,19 @@ BEGIN
 END $$;
 ```
 
-## 2. Hubungkan Google OAuth
-Agar "Tombol Masuk" berfungsi di produksi:
+## 2. Hubungkan Google OAuth & URL Pengalihan
+Agar "Tombol Masuk" berfungsi dan tidak dialihkan ke localhost:
 
-1.  Buka [Google Cloud Console](https://console.cloud.google.com/apis/credentials).
-2.  Pilih Project Anda, lalu edit **OAuth 2.0 Client ID** yang Anda gunakan.
-3.  Pada bagian **Authorized redirect URIs**, tambahkan URL ini:
-    `https://llgymjeklbrlodhzobrd.supabase.co/auth/v1/callback`
-4.  Simpan perubahan.
-5.  Di **Supabase Dashboard**, buka **Authentication > Providers > Google**.
-6.  Pastikan **Client ID** dan **Client Secret** sudah benar dan provider sudah dalam status **Enabled**.
+1.  **Supabase Dashboard > Authentication > URL Configuration**:
+    *   **Site URL**: Ubah menjadi URL aplikasi Anda (contoh: `https://ais-dev-cylpbwj5za6jcmm2s764kh-214525740717.asia-east1.run.app`)
+    *   **Redirect URIs**: Tambahkan URL yang sama jika belum ada.
+2.  **Google Cloud Console**:
+    *   Pilih Project Anda > **APIs & Services > Credentials**.
+    *   Edit **OAuth 2.0 Client ID**.
+    *   Pada **Authorized redirect URIs**, pastikan URL callback Supabase sudah benar:
+        `https://llgymjeklbrlodhzobrd.supabase.co/auth/v1/callback`
+3.  **Supabase > Authentication > Providers > Google**:
+    *   Pastikan **Client ID** dan **Client Secret** sudah benar dan statusnya **Enabled**.
 
 ## 3. Environment Variables
 Pastikan variabel ini sudah diisi di menu **Settings** AI Studio App Anda:

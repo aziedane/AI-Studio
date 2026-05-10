@@ -49,7 +49,13 @@ export const useContentPipeline = (canvasRef: React.RefObject<HTMLCanvasElement>
         addLog(`[PIPELINE] Memproses Scene #${i + 1}/${producedScenes.length}...`, "process");
         
         // Visual
-        const visualResults = await aiService.produceAssets([scene]);
+        let visualResults;
+        try {
+          visualResults = await aiService.produceAssets([scene]);
+        } catch (visErr: any) {
+          addLog(`[PIPELINE] Gagal memproduksi visual scene #${i + 1}: ${visErr.message}`, "error");
+          throw visErr;
+        }
         const visualScene = visualResults[0] || scene;
         
         // Audio
@@ -63,6 +69,7 @@ export const useContentPipeline = (canvasRef: React.RefObject<HTMLCanvasElement>
         } catch (ttsErr: any) {
           console.warn("TTS Failed for scene", i, ttsErr);
           addLog(`[PIPELINE] TTS Gagal untuk scene #${i + 1}: ${ttsErr.message || "Unknown"}`, "info");
+          // Don't throw for TTS, continue without audio if necessary
         }
 
         producedScenes[i] = {
@@ -89,7 +96,7 @@ export const useContentPipeline = (canvasRef: React.RefObject<HTMLCanvasElement>
         thumbnailUrl,
         progress: 80,
         status: 'PRODUCTION' as const,
-        updatedAt: Date.now()
+        updatedAt: new Date().toISOString()
       };
 
       await supabaseService.updateContentItem(contentId, finalUpdates);
@@ -98,9 +105,10 @@ export const useContentPipeline = (canvasRef: React.RefObject<HTMLCanvasElement>
       
       return { ...item, ...finalUpdates };
     } catch (e: any) {
-      addLog(`Gagal memproduksi aset visual: ${e.message || "Unknown Error"}`, "info");
+      const errorMessage = e.message || "Unknown Error";
+      addLog(`Gagal memproduksi aset visual: ${errorMessage}`, "error");
       console.error("[PIPELINE ERROR]", e);
-      updateAgent('producer', { status: 'ERROR', lastAction: 'Gagal Produksi' });
+      updateAgent('producer', { status: 'ERROR', lastAction: `Gagal: ${errorMessage}` });
       return null;
     }
   };

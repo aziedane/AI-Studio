@@ -50,6 +50,12 @@ export const supabaseService = {
     return session;
   },
 
+  async setSession(session: any) {
+    const supabase = getSupabase();
+    const { error } = await supabase.auth.setSession(session);
+    if (error) throw error;
+  },
+
   onAuthStateChange(callback: (user: any) => void) {
     try {
       const supabase = getSupabase();
