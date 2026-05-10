@@ -14,7 +14,7 @@ import {
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { useAppStore } from './store/useAppStore';
-import { firebaseService } from './services/firebase.service';
+import { supabaseService } from './services/supabase.service';
 import { aiService } from './services/ai.service';
 import { ttsService } from './services/tts.service';
 import { useContentPipeline } from './hooks/useContentPipeline';
@@ -27,8 +27,6 @@ import { FeedList } from './components/dashboard/FeedList';
 import { RenderOverlay } from './components/render/RenderOverlay';
 import { VideoPreviewModal } from './components/render/VideoPreviewModal';
 import { SettingsPanel } from './components/layout/SettingsPanel';
-import { auth } from './lib/firebase';
-import { onAuthStateChanged } from 'firebase/auth';
 
 export default function App() {
   const store = useAppStore();
@@ -61,7 +59,7 @@ export default function App() {
   }, [store.notification]);
 
   useEffect(() => {
-    const unsubscribeAuth = onAuthStateChanged(auth, (u) => {
+    const subscription = supabaseService.onAuthStateChange((u) => {
       store.setUser(u);
       store.setIsAuthLoading(false);
     });
@@ -89,15 +87,15 @@ export default function App() {
     window.addEventListener('message', handleMessage);
 
     return () => {
-      unsubscribeAuth();
+      subscription.unsubscribe();
       window.removeEventListener('message', handleMessage);
     };
   }, []);
 
   useEffect(() => {
     if (!store.user) return;
-    const unsubTrends = firebaseService.syncTrends(store.user.uid, store.setTrends);
-    const unsubContent = firebaseService.syncContentItems(store.user.uid, store.setContentItems);
+    const unsubTrends = supabaseService.syncTrends(store.user.id, store.setTrends);
+    const unsubContent = supabaseService.syncContentItems(store.user.id, store.setContentItems);
     return () => {
       unsubTrends();
       unsubContent();
@@ -131,7 +129,7 @@ export default function App() {
         throw new Error("Tidak ada tren baru ditemukan untuk niche: " + (store.selectedNiche || 'Umum'));
       }
       
-      await firebaseService.saveTrendsBatch(newTrends, store.user.uid);
+      await supabaseService.saveTrendsBatch(newTrends, store.user.id);
       store.updateAgent('scout', { status: 'SUCCESS', lastAction: 'Data Updated' });
       
       // Select top trend
@@ -143,7 +141,7 @@ export default function App() {
       const brief = await aiService.draftScript(topTrend);
       if (!brief) throw new Error("Gagal merancang naskah.");
       
-      await firebaseService.saveContentItem(brief as any, store.user.uid);
+      await supabaseService.saveContentItem(brief as any, store.user.id);
       store.updateAgent('architect', { status: 'SUCCESS', lastAction: 'Script Ready' });
 
       // 3. PRODUCER PHASE
@@ -191,6 +189,31 @@ export default function App() {
     }
   };
 
+  const handleLogin = async () => {
+    try {
+      await supabaseService.login();
+    } catch (err: any) {
+      console.error("Login detail:", err);
+      const isProviderError = err.message?.includes("provider is not enabled") || JSON.stringify(err).includes("provider is not enabled");
+      
+      store.addLog(`Gagal masuk: ${err.message || "Provider belum aktif"}`, "error");
+      
+      if (isProviderError) {
+        store.setNotification({ 
+          msg: "Google Provider belum aktif di Supabase Dashboard (Authentication > Providers)", 
+          type: "error" 
+        });
+      } else {
+        store.setNotification({ 
+          msg: err.message?.includes("credentials missing") 
+            ? "Sila set Supabase URL & Key di Settings" 
+            : "Gagal Masuk: Cek Koneksi/Config", 
+          type: "error" 
+        });
+      }
+    }
+  };
+
   return (
     <div className="min-h-screen bg-[#0A0A0A] text-[#D1D1D1] font-sans selection:bg-white selection:text-black">
       <RenderOverlay canvasRef={canvasRef} />
@@ -223,15 +246,15 @@ export default function App() {
           ) : store.user ? (
             <div className="flex items-center gap-3 pr-2 border-r border-[#2A2A2A]">
                <div className="flex flex-col items-end">
-                  <span className="text-[10px] font-mono text-white truncate max-w-[120px]">{store.user.displayName}</span>
+                  <span className="text-[10px] font-mono text-white truncate max-w-[120px]">{store.user.user_metadata?.full_name || store.user.email}</span>
                   <span className="text-[8px] font-mono text-emerald-500 uppercase tracking-widest">Connected</span>
                </div>
-               <button onClick={() => firebaseService.logout()} className="p-2 text-[#666] hover:text-red-400 transition-colors">
+               <button onClick={() => supabaseService.logout()} className="p-2 text-[#666] hover:text-red-400 transition-colors">
                   <LogOut className="w-5 h-5" />
                </button>
             </div>
           ) : (
-            <button onClick={() => firebaseService.login()} className="flex items-center gap-2 px-3 py-1.5 font-mono text-[10px] uppercase tracking-widest bg-blue-600 text-white hover:bg-blue-500 transition-all border border-blue-400">
+            <button onClick={handleLogin} className="flex items-center gap-2 px-3 py-1.5 font-mono text-[10px] uppercase tracking-widest bg-blue-600 text-white hover:bg-blue-500 transition-all border border-blue-400">
               <LogIn className="w-3 h-3" /> Masuk
             </button>
           )}

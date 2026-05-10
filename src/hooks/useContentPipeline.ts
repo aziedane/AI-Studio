@@ -1,6 +1,6 @@
 import { useAppStore } from '../store/useAppStore';
 import { aiService } from '../services/ai.service';
-import { firebaseService } from '../services/firebase.service';
+import { supabaseService } from '../services/supabase.service';
 import { VideoEngine } from '../engines/videoEngine';
 import { ContentPiece } from '../types';
 import { ttsService } from '../services/tts.service';
@@ -92,7 +92,7 @@ export const useContentPipeline = (canvasRef: React.RefObject<HTMLCanvasElement>
         updatedAt: Date.now()
       };
 
-      await firebaseService.updateContentItem(contentId, finalUpdates);
+      await supabaseService.updateContentItem(contentId, finalUpdates);
       addLog(`[PIPELINE] Seluruh aset visual & audio siap. Status: PRODUCTION`, "success");
       updateAgent('producer', { status: 'SUCCESS', lastAction: 'Production Ready' });
       
@@ -137,7 +137,7 @@ export const useContentPipeline = (canvasRef: React.RefObject<HTMLCanvasElement>
       if (data.success && data.downloadUrl) {
         addLog(`[MASTERING] Server sukses merender video HD MP4.`, "success");
         
-        await firebaseService.updateContentItem(contentId, {
+        await supabaseService.updateContentItem(contentId, {
           status: 'READY',
           progress: 100,
           downloadUrl: data.downloadUrl
@@ -207,7 +207,7 @@ export const useContentPipeline = (canvasRef: React.RefObject<HTMLCanvasElement>
 
       const data = await response.json();
       if (data.success) {
-        await firebaseService.updateContentItem(contentId, {
+        await supabaseService.updateContentItem(contentId, {
           status: 'PUBLISHED',
           progress: 100,
           publishedUrl: `https://www.youtube.com/watch?v=${data.videoId}`,

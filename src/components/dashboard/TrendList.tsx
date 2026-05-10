@@ -2,7 +2,7 @@ import React from 'react';
 import { TrendingUp } from 'lucide-react';
 import { useAppStore } from '../../store/useAppStore';
 import { ActionButton } from '../ui/ActionButton';
-import { firebaseService } from '../../services/firebase.service';
+import { supabaseService } from '../../services/supabase.service';
 import { aiService } from '../../services/ai.service';
 import { Trend } from '../../types';
 
@@ -19,7 +19,7 @@ export const TrendList: React.FC = () => {
     try {
       const newTrends = await aiService.scoutTrends(selectedNiche);
       if (newTrends.length > 0) {
-        await firebaseService.saveTrendsBatch(newTrends, user.uid);
+        await supabaseService.saveTrendsBatch(newTrends, user.id);
         addLog(`Berhasil menemukan ${newTrends.length} tren baru.`, "success");
         updateAgent('scout', { status: 'SUCCESS', lastAction: 'Database Diperbarui' });
       }
@@ -38,7 +38,7 @@ export const TrendList: React.FC = () => {
     try {
       const brief = await aiService.draftScript(trend);
       if (brief) {
-        await firebaseService.saveContentItem(brief as any, user.uid);
+        await supabaseService.saveContentItem(brief as any, user.id);
         addLog(`Konten brief selesai dibuat: ${brief.title}`, "success");
         updateAgent('architect', { status: 'SUCCESS', lastAction: 'Konsep Matang & Terarsip' });
       }

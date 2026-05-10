@@ -2,7 +2,7 @@ import React from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { Layers, Image as ImageIcon, Video, Download, Play, Loader2 } from 'lucide-react';
 import { useAppStore } from '../../store/useAppStore';
-import { firebaseService } from '../../services/firebase.service';
+import { supabaseService } from '../../services/supabase.service';
 import { ContentPiece } from '../../types';
 
 interface FeedListProps {
@@ -191,7 +191,7 @@ export const FeedList: React.FC<FeedListProps> = ({ onRender, onFinalize, onProd
                   )}
 
                   <button 
-                    onClick={() => firebaseService.deleteContentItem(item.id)}
+                    onClick={() => supabaseService.deleteContentItem(item.id)}
                     className="w-full py-1.5 text-red-500/60 hover:text-red-500 text-[9px] font-mono uppercase tracking-widest transition-all border border-transparent hover:border-red-500/20"
                   >
                     Hapus
